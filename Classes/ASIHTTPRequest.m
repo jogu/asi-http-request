@@ -1099,10 +1099,10 @@ static NSOperationQueue *sharedQueue = nil;
 			} else {
 				[self incrementUploadSizeBy:1];	 
 			}
-			[ASIHTTPRequest updateProgressIndicator:[self uploadProgressDelegate] withProgress:0 ofTotal:1];
+			[ASIHTTPRequest updateProgressIndicator:&uploadProgressDelegate withProgress:0 ofTotal:1];
 		}
 		if ([self shouldResetDownloadProgress] && ![self partialDownloadSize]) {
-			[ASIHTTPRequest updateProgressIndicator:[self downloadProgressDelegate] withProgress:0 ofTotal:1];
+			[ASIHTTPRequest updateProgressIndicator:&downloadProgressDelegate withProgress:0 ofTotal:1];
 		}
 	}	
 	
@@ -1367,7 +1367,7 @@ static NSOperationQueue *sharedQueue = nil;
 	#if !TARGET_OS_IPHONE
 	// If the uploadProgressDelegate is an NSProgressIndicator, we set its MaxValue to 1.0 so we can update it as if it were a UIProgressView
 	double max = 1.0;
-	[ASIHTTPRequest performSelector:@selector(setMaxValue:) onTarget:[self uploadProgressDelegate] withObject:nil amount:&max];
+	[ASIHTTPRequest performSelector:@selector(setMaxValue:) onTarget:&uploadProgressDelegate withObject:nil amount:&max];
 	#endif
 	[[self cancelledLock] unlock];
 }
@@ -1388,7 +1388,7 @@ static NSOperationQueue *sharedQueue = nil;
 	#if !TARGET_OS_IPHONE
 	// If the downloadProgressDelegate is an NSProgressIndicator, we set its MaxValue to 1.0 so we can update it as if it were a UIProgressView
 	double max = 1.0;
-	[ASIHTTPRequest performSelector:@selector(setMaxValue:) onTarget:[self downloadProgressDelegate] withObject:nil amount:&max];	
+	[ASIHTTPRequest performSelector:@selector(setMaxValue:) onTarget:&downloadProgressDelegate withObject:nil amount:&max];	
 	#endif
 	[[self cancelledLock] unlock];
 }
@@ -1417,9 +1417,9 @@ static NSOperationQueue *sharedQueue = nil;
 		return;
 	}
 
-	[ASIHTTPRequest performSelector:@selector(request:didReceiveBytes:) onTarget:[self queue] withObject:self amount:&value];
-	[ASIHTTPRequest performSelector:@selector(request:didReceiveBytes:) onTarget:[self downloadProgressDelegate] withObject:self amount:&value];
-	[ASIHTTPRequest updateProgressIndicator:[self downloadProgressDelegate] withProgress:[self totalBytesRead]+[self partialDownloadSize] ofTotal:[self contentLength]+[self partialDownloadSize]];
+	[ASIHTTPRequest performSelector:@selector(request:didReceiveBytes:) onTarget:&queue withObject:self amount:&value];
+	[ASIHTTPRequest performSelector:@selector(request:didReceiveBytes:) onTarget:&downloadProgressDelegate withObject:self amount:&value];
+	[ASIHTTPRequest updateProgressIndicator:&downloadProgressDelegate withProgress:[self totalBytesRead]+[self partialDownloadSize] ofTotal:[self contentLength]+[self partialDownloadSize]];
 		
 	[self setLastBytesRead:bytesReadSoFar];
 }
@@ -1456,42 +1456,50 @@ static NSOperationQueue *sharedQueue = nil;
 		return;
 	}
 	
-	[ASIHTTPRequest performSelector:@selector(request:didSendBytes:) onTarget:[self queue] withObject:self amount:&value];
-	[ASIHTTPRequest performSelector:@selector(request:didSendBytes:) onTarget:[self uploadProgressDelegate] withObject:self amount:&value];
-	[ASIHTTPRequest updateProgressIndicator:[self uploadProgressDelegate] withProgress:[self totalBytesSent]-[self uploadBufferSize] ofTotal:[self postLength]-[self uploadBufferSize]];
+	[ASIHTTPRequest performSelector:@selector(request:didSendBytes:) onTarget:&queue withObject:self amount:&value];
+	[ASIHTTPRequest performSelector:@selector(request:didSendBytes:) onTarget:&uploadProgressDelegate withObject:self amount:&value];
+	[ASIHTTPRequest updateProgressIndicator:&uploadProgressDelegate withProgress:[self totalBytesSent]-[self uploadBufferSize] ofTotal:[self postLength]-[self uploadBufferSize]];
 }
 
 
 - (void)incrementDownloadSizeBy:(long long)length
 {
-	[ASIHTTPRequest performSelector:@selector(request:incrementDownloadSizeBy:) onTarget:[self queue] withObject:self amount:&length];
-	[ASIHTTPRequest performSelector:@selector(request:incrementDownloadSizeBy:) onTarget:[self downloadProgressDelegate] withObject:self amount:&length];
+	[ASIHTTPRequest performSelector:@selector(request:incrementDownloadSizeBy:) onTarget:&queue withObject:self amount:&length];
+	[ASIHTTPRequest performSelector:@selector(request:incrementDownloadSizeBy:) onTarget:&downloadProgressDelegate withObject:self amount:&length];
 }
 
 
 - (void)incrementUploadSizeBy:(long long)length
 {
-	[ASIHTTPRequest performSelector:@selector(request:incrementUploadSizeBy:) onTarget:[self queue] withObject:self amount:&length];
-	[ASIHTTPRequest performSelector:@selector(request:incrementUploadSizeBy:) onTarget:[self uploadProgressDelegate] withObject:self amount:&length];
+	[ASIHTTPRequest performSelector:@selector(request:incrementUploadSizeBy:) onTarget:&queue withObject:self amount:&length];
+	[ASIHTTPRequest performSelector:@selector(request:incrementUploadSizeBy:) onTarget:&uploadProgressDelegate withObject:self amount:&length];
 }
 
 
 -(void)removeUploadProgressSoFar
 {
 	long long progressToRemove = -[self totalBytesSent];
-	[ASIHTTPRequest performSelector:@selector(request:didSendBytes:) onTarget:[self queue] withObject:self amount:&progressToRemove];
-	[ASIHTTPRequest performSelector:@selector(request:didSendBytes:) onTarget:[self uploadProgressDelegate] withObject:self amount:&progressToRemove];
-	[ASIHTTPRequest updateProgressIndicator:[self uploadProgressDelegate] withProgress:0 ofTotal:[self postLength]];
+	[ASIHTTPRequest performSelector:@selector(request:didSendBytes:) onTarget:&queue withObject:self amount:&progressToRemove];
+	[ASIHTTPRequest performSelector:@selector(request:didSendBytes:) onTarget:&uploadProgressDelegate withObject:self amount:&progressToRemove];
+	[ASIHTTPRequest updateProgressIndicator:&uploadProgressDelegate withProgress:0 ofTotal:[self postLength]];
 }
 
-
-+ (void)performSelector:(SEL)selector onTarget:(id)target withObject:(id)object amount:(void *)amount
++ (void)performInvocation:(NSInvocation *)invocation onTarget:(id *)target
 {
-	if ([target respondsToSelector:selector]) {
+    if (*target && [*target respondsToSelector:invocation.selector])
+    {
+        [invocation invokeWithTarget:*target];
+    }
+    [invocation release];
+    [self autorelease];
+}
+
++ (void)performSelector:(SEL)selector onTarget:(id *)target withObject:(id)object amount:(void *)amount
+{
+	if ([*target respondsToSelector:selector]) {
 		NSMethodSignature *signature = nil;
-		signature = [[target class] instanceMethodSignatureForSelector:selector];
-		NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
-		[invocation setTarget:target];
+		signature = [[*target class] instanceMethodSignatureForSelector:selector];
+		NSInvocation *invocation = [[NSInvocation invocationWithMethodSignature:signature] retain];
 		[invocation setSelector:selector];
 		
 		int argumentNumber = 2;
@@ -1507,12 +1515,21 @@ static NSOperationQueue *sharedQueue = nil;
 			[invocation setArgument:amount atIndex:argumentNumber];
 		}
 
-		[invocation performSelectorOnMainThread:@selector(invokeWithTarget:) withObject:target waitUntilDone:[NSThread isMainThread]];
-	}
+        SEL callback = @selector(performInvocation:onTarget:);
+        NSMethodSignature *cbSignature = [ASIHTTPRequest methodSignatureForSelector:callback];
+        NSInvocation *cbInvocation = [NSInvocation invocationWithMethodSignature:cbSignature];
+        [cbInvocation setSelector:callback];
+        [cbInvocation setTarget:self];
+        [cbInvocation setArgument:&invocation atIndex:2];
+        [cbInvocation setArgument:&target atIndex:3];
+        
+        [self retain]; // ensure we stay around for the duration of the callback
+        [cbInvocation performSelectorOnMainThread:@selector(invoke) withObject:nil waitUntilDone:[NSThread isMainThread]];
+    }
 }
 	
 	
-+ (void)updateProgressIndicator:(id)indicator withProgress:(unsigned long long)progress ofTotal:(unsigned long long)total
++ (void)updateProgressIndicator:(id *)indicator withProgress:(unsigned long long)progress ofTotal:(unsigned long long)total
 {
 	#if TARGET_OS_IPHONE
 		// Cocoa Touch: UIProgressView
@@ -1525,7 +1542,7 @@ static NSOperationQueue *sharedQueue = nil;
 		SEL selector = @selector(setDoubleValue:);
 	#endif
 	
-	if (![indicator respondsToSelector:selector]) {
+	if (![*indicator respondsToSelector:selector]) {
 		return;
 	}
 	
@@ -1538,6 +1555,43 @@ static NSOperationQueue *sharedQueue = nil;
 #pragma mark handling request complete / failure
 
 
+- (void)callSelectorCallback:(SEL *)selectorPtr withTarget:(id *)targetPtr
+{
+	id target = *targetPtr;
+	SEL selector = *selectorPtr;
+	
+	if (!selector || !target)
+		return;
+	
+	if ([target respondsToSelector:selector])
+	{
+		[target performSelector:selector withObject:self];
+	}
+    [self autorelease];
+}
+
+// Call a selector for a delegate on the main thread
+// As either the delegate or the selector may be changed before we get
+// to run on the main thread, they are passed as pointers, which we only
+// dereference on the main thread just before we call the selector
+- (void)callSelectorOnMainThread:(SEL *)selector forDelegate:(id *)target
+{
+	if (!*selector || !*target)
+		return;
+	
+	SEL callback = @selector(callSelectorCallback:withTarget:);
+	NSMethodSignature *signature = [ASIHTTPRequest instanceMethodSignatureForSelector:callback];
+	NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
+	[invocation setSelector:callback];
+	[invocation setTarget:self];
+	[invocation setArgument:&selector atIndex:2];
+	[invocation setArgument:&target atIndex:3];
+	
+    [self retain]; // ensure we stay around for the duration of the callback
+	[invocation performSelectorOnMainThread:@selector(invoke) withObject:nil waitUntilDone:[NSThread isMainThread]];
+}
+
+
 
 - (void)requestReceivedResponseHeaders
 {
@@ -1545,14 +1599,10 @@ static NSOperationQueue *sharedQueue = nil;
 		return;
 	}
 	// Let the delegate know we have started
-	if ([self didReceiveResponseHeadersSelector] && [[self delegate] respondsToSelector:[self didReceiveResponseHeadersSelector]]) {
-		[[self delegate] performSelectorOnMainThread:[self didReceiveResponseHeadersSelector] withObject:self waitUntilDone:[NSThread isMainThread]];		
-	}
+	[self callSelectorOnMainThread:&didReceiveResponseHeadersSelector forDelegate:&delegate];
 	
 	// Let the queue know we have started
-	if ([[self queue] respondsToSelector:@selector(requestReceivedResponseHeaders:)]) {
-		[[self queue] performSelectorOnMainThread:@selector(requestReceivedResponseHeaders:) withObject:self waitUntilDone:[NSThread isMainThread]];		
-	}
+	[self callSelectorOnMainThread:&@selector(requestReceivedResponseHeaders:) forDelegate:&queue];
 }
 
 - (void)requestStarted
@@ -1561,14 +1611,10 @@ static NSOperationQueue *sharedQueue = nil;
 		return;
 	}
 	// Let the delegate know we have started
-	if ([self didStartSelector] && [[self delegate] respondsToSelector:[self didStartSelector]]) {
-		[[self delegate] performSelectorOnMainThread:[self didStartSelector] withObject:self waitUntilDone:[NSThread isMainThread]];		
-	}
+	[self callSelectorOnMainThread:&didStartSelector forDelegate:&delegate];
 	
 	// Let the queue know we have started
-	if ([[self queue] respondsToSelector:@selector(requestStarted:)]) {
-		[[self queue] performSelectorOnMainThread:@selector(requestStarted:) withObject:self waitUntilDone:[NSThread isMainThread]];		
-	}
+	[self callSelectorOnMainThread:&@selector(requestStarted:) forDelegate:&queue];
 }
 
 // Subclasses might override this method to process the result in the same thread
@@ -1582,15 +1628,20 @@ static NSOperationQueue *sharedQueue = nil;
 		return;
 	}
 	// Let the delegate know we are done
-	if ([self didFinishSelector] && [[self delegate] respondsToSelector:[self didFinishSelector]]) {
-		[[self delegate] performSelectorOnMainThread:[self didFinishSelector] withObject:self waitUntilDone:[NSThread isMainThread]];		
-	}
+	[self callSelectorOnMainThread:&didFinishSelector forDelegate:&delegate];
 	
 	// Let the queue know we are done
-	if ([[self queue] respondsToSelector:@selector(requestFinished:)]) {
-		[[self queue] performSelectorOnMainThread:@selector(requestFinished:) withObject:self waitUntilDone:[NSThread isMainThread]];		
-	}
+	[self callSelectorOnMainThread:&@selector(requestFinished:) forDelegate:&queue];	
+}
+
+
+- (void)reportFailure
+{
+    // Let the delegate know something went wrong
+	[self callSelectorOnMainThread:&didFailSelector forDelegate:&delegate];
 	
+	// Let the queue know something went wrong
+	[self callSelectorOnMainThread:&@selector(requestFailed:) forDelegate:&queue];
 }
 
 // Subclasses might override this method to perform error handling in the same thread
@@ -1638,15 +1689,7 @@ static NSOperationQueue *sharedQueue = nil;
 		[failedRequest setError:theError];
 	}
 
-	// Let the delegate know something went wrong
-	if ([failedRequest didFailSelector] && [[failedRequest delegate] respondsToSelector:[failedRequest didFailSelector]]) {
-		[[failedRequest delegate] performSelectorOnMainThread:[failedRequest didFailSelector] withObject:failedRequest waitUntilDone:[NSThread isMainThread]];	
-	}
-	
-	// Let the queue know something went wrong
-	if ([[failedRequest queue] respondsToSelector:@selector(requestFailed:)]) {
-		[[failedRequest queue] performSelectorOnMainThread:@selector(requestFailed:) withObject:failedRequest waitUntilDone:[NSThread isMainThread]];		
-	}
+    [failedRequest reportFailure];
 	
 	// markAsFinished may well cause this object to be dealloced
 	[self retain];
@@ -2507,6 +2550,15 @@ static NSOperationQueue *sharedQueue = nil;
 	[pool release];
 }
 
+// This runs on the main thread to run the given invocation on the current delegate
+- (void)invocateDelegate:(NSInvocation *)invocation
+{
+    if (delegate && [delegate respondsToSelector:invocation.selector])
+    {
+        [invocation invokeWithTarget:delegate];
+    }
+    [invocation release];
+}
 
 - (void)handleBytesAvailable
 {
@@ -2579,14 +2631,13 @@ static NSOperationQueue *sharedQueue = nil;
 		// Does the delegate want to handle the data manually?
 		if ([[self delegate] respondsToSelector:[self didReceiveDataSelector]]) {
 			NSMethodSignature *signature = [[[self delegate] class] instanceMethodSignatureForSelector:[self didReceiveDataSelector]];
-			NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
-			[invocation setTarget:[self delegate]];
+			NSInvocation *invocation = [[NSInvocation invocationWithMethodSignature:signature] retain];
 			[invocation setSelector:[self didReceiveDataSelector]];
 			[invocation setArgument:&self atIndex:2];
 			NSData *data = [NSData dataWithBytes:buffer length:bytesRead];
 			[invocation setArgument:&data atIndex:3];
 			[invocation retainArguments];
-			[invocation performSelectorOnMainThread:@selector(invokeWithTarget:) withObject:[self delegate] waitUntilDone:[NSThread isMainThread]];
+            [self performSelectorOnMainThread:@selector(invocateDelegate:) withObject:invocation waitUntilDone:[NSThread isMainThread]];
 
 		// Are we downloading to a file?
 		} else if ([self downloadDestinationPath]) {
