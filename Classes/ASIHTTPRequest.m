@@ -3564,6 +3564,13 @@ static NSOperationQueue *sharedQueue = nil;
     return Z_OK;
 }
 
+#pragma mark set max concurrent requests
+
++ (void)setMaxConcurrentRequests:(NSInteger)maxConcurrent
+{
+    [sharedQueue setMaxConcurrentOperationCount:maxConcurrent];
+}
+
 #pragma mark get user agent
 
 + (NSString *)defaultUserAgentString
