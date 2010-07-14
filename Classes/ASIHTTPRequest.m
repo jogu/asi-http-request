@@ -21,6 +21,11 @@
 #endif
 #import "ASIInputStream.h"
 
+#if DEBUG_CACHE
+#define CACHEDBUG(...) NSLog(__VA_ARGS__)
+#else
+#define CACHEDBUG(...)
+#endif
 
 // Automatically set on build
 
@@ -655,6 +660,7 @@ static NSOperationQueue *sharedQueue = nil;
 			// See if we should pull from the cache rather than fetching the data
 			if ([self cachePolicy] == ASIOnlyLoadIfNotCachedCachePolicy) {
 				if ([self useDataFromCache]) {
+                    CACHEDBUG(@"%@: Using data from cache", [self.url absoluteURL]);
 					return;
 				}
 			} else if ([self cachePolicy] == ASIReloadIfDifferentCachePolicy) {
@@ -670,9 +676,14 @@ static NSOperationQueue *sharedQueue = nil;
 					if (lastModified) {
 						[[self requestHeaders] setObject:lastModified forKey:@"If-Modified-Since"];
 					}
+                    if (etag || lastModified)
+                    {
+                        CACHEDBUG(@"%@: Conditional request headers set", [self.url absoluteURL]);
+                    }
 				}
 			}
 		}
+        CACHEDBUG(@"%@: Loading from network", [self.url absoluteURL]);
 
 		[self applyAuthorizationHeader];
 		
