@@ -28,8 +28,7 @@
 #endif
 
 // Automatically set on build
-
-NSString *ASIHTTPRequestVersion = @"v1.7-13 2010-07-02";
+NSString *ASIHTTPRequestVersion = @"v1.7-24 2010-07-18";
 
 NSString* const NetworkRequestErrorDomain = @"ASIHTTPRequestErrorDomain";
 
@@ -166,6 +165,9 @@ static NSOperationQueue *sharedQueue = nil;
 
 
 - (BOOL)useDataFromCache;
+
+// Called to update the size of a partial download when starting a request, or retrying after a timeout
+- (void)updatePartialDownloadSize;
 
 #if TARGET_OS_IPHONE
 + (void)registerForNetworkReachabilityNotifications;
@@ -511,7 +513,7 @@ static NSOperationQueue *sharedQueue = nil;
 		[[self cancelledLock] unlock];
 		return;
 	}
-	
+
 	[self failWithError:ASIRequestCancelledError];
 	[self setComplete:YES];
 	[self cancelLoad];
@@ -826,6 +828,14 @@ static NSOperationQueue *sharedQueue = nil;
 	}
 	
 	// Should this request resume an existing download?
+	[self updatePartialDownloadSize];
+	if ([self partialDownloadSize]) {
+		[self addRequestHeader:@"Range" value:[NSString stringWithFormat:@"bytes=%llu-",[self partialDownloadSize]]];
+	}
+}
+
+- (void)updatePartialDownloadSize
+{
 	if ([self allowResumeForFileDownloads] && [self downloadDestinationPath] && [self temporaryFileDownloadPath] && [[NSFileManager defaultManager] fileExistsAtPath:[self temporaryFileDownloadPath]]) {
 		NSError *err = nil;
 		[self setPartialDownloadSize:[[[NSFileManager defaultManager] attributesOfItemAtPath:[self temporaryFileDownloadPath] error:&err] fileSize]];
@@ -833,8 +843,7 @@ static NSOperationQueue *sharedQueue = nil;
 			[self failWithError:[NSError errorWithDomain:NetworkRequestErrorDomain code:ASIFileManagementError userInfo:[NSDictionary dictionaryWithObjectsAndKeys:[NSString stringWithFormat:@"Failed to get attributes for file at path '@%'",[self temporaryFileDownloadPath]],NSLocalizedDescriptionKey,error,NSUnderlyingErrorKey,nil]]];
 			return;
 		}
-		[self addRequestHeader:@"Range" value:[NSString stringWithFormat:@"bytes=%llu-",[self partialDownloadSize]]];
-	}	
+	}
 }
 
 - (void)startRequest
@@ -1072,7 +1081,7 @@ static NSOperationQueue *sharedQueue = nil;
 	}
 	
 	[connectionsLock unlock];
-	
+
 	// Schedule the stream
 	if (![self readStreamIsScheduled] && (!throttleWakeUpTime || [throttleWakeUpTime timeIntervalSinceDate:[NSDate date]] < 0)) {
 		[self scheduleReadStream];
@@ -1200,6 +1209,12 @@ static NSOperationQueue *sharedQueue = nil;
 	if ([self shouldTimeOut]) {			
 		// Do we need to auto-retry this request?
 		if ([self numberOfTimesToRetryOnTimeout] > [self retryCount]) {
+
+			// If we are resuming a download, we may need to update the Range header to take account of data we've just downloaded
+			[self updatePartialDownloadSize];
+			if ([self partialDownloadSize]) {
+				CFHTTPMessageSetHeaderFieldValue(request, (CFStringRef)@"Range", (CFStringRef)[NSString stringWithFormat:@"bytes=%llu-",[self partialDownloadSize]]);
+			}
 			[self setRetryCount:[self retryCount]+1];
 			[self unscheduleReadStream];
 			[[self cancelledLock] unlock];
@@ -1612,7 +1627,8 @@ static NSOperationQueue *sharedQueue = nil;
 	[self callSelectorOnMainThread:&didReceiveResponseHeadersSelector forDelegate:&delegate];
 	
 	// Let the queue know we have started
-	[self callSelectorOnMainThread:&@selector(requestReceivedResponseHeaders:) forDelegate:&queue];
+	SEL sel = @selector(requestReceivedResponseHeaders:);
+	[self callSelectorOnMainThread:&sel forDelegate:&queue];
 }
 
 - (void)requestStarted
@@ -1624,7 +1640,8 @@ static NSOperationQueue *sharedQueue = nil;
 	[self callSelectorOnMainThread:&didStartSelector forDelegate:&delegate];
 	
 	// Let the queue know we have started
-	[self callSelectorOnMainThread:&@selector(requestStarted:) forDelegate:&queue];
+	SEL sel = @selector(requestStarted:);
+	[self callSelectorOnMainThread:&sel forDelegate:&queue];
 }
 
 // Subclasses might override this method to process the result in the same thread
@@ -1641,7 +1658,8 @@ static NSOperationQueue *sharedQueue = nil;
 	[self callSelectorOnMainThread:&didFinishSelector forDelegate:&delegate];
 	
 	// Let the queue know we are done
-	[self callSelectorOnMainThread:&@selector(requestFinished:) forDelegate:&queue];	
+	SEL sel = @selector(requestFinished:);
+	[self callSelectorOnMainThread:&sel forDelegate:&queue];
 }
 
 
@@ -1651,7 +1669,8 @@ static NSOperationQueue *sharedQueue = nil;
 	[self callSelectorOnMainThread:&didFailSelector forDelegate:&delegate];
 	
 	// Let the queue know something went wrong
-	[self callSelectorOnMainThread:&@selector(requestFailed:) forDelegate:&queue];
+	SEL sel = @selector(requestFailed:);
+	[self callSelectorOnMainThread:&sel forDelegate:&queue];
 }
 
 // Subclasses might override this method to perform error handling in the same thread
@@ -2655,10 +2674,15 @@ static NSOperationQueue *sharedQueue = nil;
 				BOOL append = NO;
 				if (![self temporaryFileDownloadPath]) {
 					[self setTemporaryFileDownloadPath:[NSTemporaryDirectory() stringByAppendingPathComponent:[[NSProcessInfo processInfo] globallyUniqueString]]];
-				} else if ([self allowResumeForFileDownloads]) {
-					append = YES;
+				} else if ([self allowResumeForFileDownloads] && [[self requestHeaders] objectForKey:@"Range"]) {
+					if ([[self responseHeaders] objectForKey:@"Content-Range"]) {
+						append = YES;
+					} else {
+						[self incrementDownloadSizeBy:-[self partialDownloadSize]];
+						[self setPartialDownloadSize:0];
+					}
 				}
-				
+
 				[self setFileDownloadOutputStream:[[[NSOutputStream alloc] initToFileAtPath:[self temporaryFileDownloadPath] append:append] autorelease]];
 				[[self fileDownloadOutputStream] open];
 			}
@@ -2887,7 +2911,7 @@ static NSOperationQueue *sharedQueue = nil;
 
 {
 	NSError *underlyingError = NSMakeCollectable([(NSError *)CFReadStreamCopyError((CFReadStreamRef)[self readStream]) autorelease]);
-	
+
 	[self cancelLoad];
 	
 	if (![self error]) { // We may already have handled this error
