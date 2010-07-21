@@ -652,12 +652,6 @@ extern unsigned long const ASIWWANBandwidthThrottleAmount;
 + (int)compressDataFromFile:(NSString *)sourcePath toFile:(NSString *)destinationPath;
 + (int)compressDataFromSource:(FILE *)source toDestination:(FILE *)dest;
 
-#pragma mark set max concurrent requests
-
-// adjust the number of concurrent requests on the default queue
-// defaults to 4.
-+ (void)setMaxConcurrentRequests:(NSInteger)maxConcurrent;
-
 #pragma mark get user agent
 
 // Will be used as a user agent if requests do not specify a custom user agent
