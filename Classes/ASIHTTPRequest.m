@@ -512,17 +512,24 @@ static NSOperationQueue *sharedQueue = nil;
 
 	[[self cancelledLock] lock];
 
-	if ([self isCancelled] || [self complete]) {
+    if (cancelled) {
 		[[self cancelledLock] unlock];
 		return;
 	}
 
+    [self willChangeValueForKey:@"isCancelled"];
+    cancelled = YES;
+    [self didChangeValueForKey:@"isCancelled"];
+    
+	if ([self complete]) {
+		[[self cancelledLock] unlock];
+		return;
+	}
 	[self failWithError:ASIRequestCancelledError];
 	[self setComplete:YES];
 	[self cancelLoad];
 	
 	[[self retain] autorelease];
-	[super cancel];
 
 	[[self cancelledLock] unlock];
 }
@@ -534,6 +541,18 @@ static NSOperationQueue *sharedQueue = nil;
                  onThread:[[self class] threadForRequest:self]
                withObject:nil
             waitUntilDone:NO];    
+}
+
+
+- (BOOL)isCancelled
+{
+    BOOL result;
+    
+	[[self cancelledLock] lock];
+    result = cancelled;
+    [[self cancelledLock] unlock];
+    
+    return result;
 }
 
 // Call this method to get the received data as an NSString. Don't use for binary data!
@@ -1706,7 +1725,7 @@ static NSOperationQueue *sharedQueue = nil;
 		[[self connectionInfo] setObject:[NSDate dateWithTimeIntervalSinceNow:[self persistentConnectionTimeoutSeconds]] forKey:@"expires"];
 	}
 	
-	if ([self isCancelled] || [self error]) {
+    if ([self error]) {
 		return;
 	}
 	
