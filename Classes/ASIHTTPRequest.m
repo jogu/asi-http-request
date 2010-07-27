@@ -28,7 +28,7 @@
 #endif
 
 // Automatically set on build
-NSString *ASIHTTPRequestVersion = @"v1.7-25 2010-07-22";
+NSString *ASIHTTPRequestVersion = @"v1.7-35 2010-07-27";
 
 NSString* const NetworkRequestErrorDomain = @"ASIHTTPRequestErrorDomain";
 
@@ -181,6 +181,8 @@ static NSOperationQueue *sharedQueue = nil;
 // Called when the status of the network changes
 + (void)reachabilityChanged:(NSNotification *)note;
 
+- (void)failAuthentication;
+
 #endif
 
 @property (assign) BOOL complete;
@@ -320,6 +322,7 @@ static NSOperationQueue *sharedQueue = nil;
 		CFRelease(request);
 	}
 	[self cancelLoad];
+	[queue release];
 	[userInfo release];
 	[postBody release];
 	[compressedPostBody release];
@@ -505,7 +508,10 @@ static NSOperationQueue *sharedQueue = nil;
 - (void)setQueue:(id)newQueue
 {
 	[[self cancelledLock] lock];
-	queue = newQueue;
+	if (newQueue != queue) {
+		[queue release];
+		queue = [newQueue retain];
+	}
 	[[self cancelledLock] unlock];
 }
 
@@ -518,8 +524,6 @@ static NSOperationQueue *sharedQueue = nil;
 	NSLog(@"Request cancelled: %@",self);
 	#endif
     
-    [self autorelease];
-
 	[[self cancelledLock] lock];
 
     if ([self isCancelled] || [self complete]) {
@@ -540,11 +544,7 @@ static NSOperationQueue *sharedQueue = nil;
 
 - (void)cancel
 {
-    [self retain];
-    [self performSelector:@selector(cancelOnRequestThread)
-                 onThread:[[self class] threadForRequest:self]
-               withObject:nil
-            waitUntilDone:NO];    
+    [self performSelector:@selector(cancelOnRequestThread) onThread:[[self class] threadForRequest:self] withObject:nil waitUntilDone:NO];    
 }
 
 
@@ -2181,11 +2181,16 @@ static NSOperationQueue *sharedQueue = nil;
 // Called by delegate or authentication dialog to resume loading once authentication info has been populated
 - (void)retryUsingSuppliedCredentials
 {
-	[self attemptToApplyCredentialsAndResume];
+	[self performSelector:@selector(attemptToApplyCredentialsAndResume) onThread:[[self class] threadForRequest:self] withObject:nil waitUntilDone:NO];
 }
 
 // Called by delegate or authentication dialog to cancel authentication
 - (void)cancelAuthentication
+{
+	[self performSelector:@selector(failAuthentication) onThread:[[self class] threadForRequest:self] withObject:nil waitUntilDone:NO];
+}
+
+- (void)failAuthentication
 {
 	[self failWithError:ASIAuthenticationError];
 }
